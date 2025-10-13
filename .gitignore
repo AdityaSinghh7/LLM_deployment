@@ -1,0 +1,90 @@
+# -----------------------------
+# Global ignores for this repo
+# -----------------------------
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Packaging / build artifacts
+build/
+dist/
+wheels/
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+sdist/
+downloads/
+*.egg
+MANIFEST
+
+# Test / coverage
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.pyre/
+.tox/
+.nox/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+__pypackages__/
+.conda/
+conda-env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-*
+*.swp
+*.swo
+*~
+*.orig
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+.Trashes
+.Spotlight-V100
+
+# Logs
+logs/
+*.log
+
+# Environment files (keep templates)
+.env
+.env.*
+*.env
+!.env.example
+.envrc
+.direnv/
+
+# Docker / BuildKit
+**/.build_tag
+docker-compose.override.yml
+docker-bake.hcl.local
+
+# Caches
+.cache/
+.ruff_cache/
+
