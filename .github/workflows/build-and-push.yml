@@ -17,6 +17,24 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Show disk before cleanup
+        run: |
+          df -h || true
+
+      - name: Free disk space on runner
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+
+      - name: Show disk after cleanup
+        run: |
+          df -h
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -54,4 +72,3 @@ jobs:
           provenance: false
           sbom: false
           outputs: type=image,push=true,compression=gzip,force-compression=false
-
