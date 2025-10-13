@@ -13,6 +13,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.venv/
 
 # IDE
 .vscode/
@@ -41,3 +42,10 @@ README.md
 # Temporary files
 *.tmp
 *.temp
+
+# Caches
+.cache/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.ipynb_checkpoints/

@@ -19,6 +19,16 @@ ifndef TAG
 endif
 DOCKERFILE    := docker/Dockerfile.runtime
 
+# Push behavior toggles
+# - COMPRESSION: zstd or gzip (zstd reduces size, needs registry support)
+# - FORCE_COMPRESSION: true/false
+# - PUSH_EXPORTER: image|registry
+#     image    -> use image exporter (+ --push semantics) and tags (-t)
+#     registry -> use registry exporter with explicit name= entries
+COMPRESSION      ?= gzip
+FORCE_COMPRESSION?= false
+PUSH_EXPORTER    ?= image
+
 # Optional: registry cache, opt-in via PUSH_CACHE=1
 ifeq ($(PUSH_CACHE),1)
 CACHE_REF     := $(IMAGE):cache
@@ -36,21 +46,40 @@ BUILD_FLAGS   := --platform $(PLAT) \
                  --sbom=false \
                  $(CACHE_FLAGS)
 
+# Compose exporter flags based on PUSH_EXPORTER
+ifeq ($(PUSH_EXPORTER),registry)
+PUSH_OUTPUT     := --output=type=registry,compression=$(COMPRESSION),force-compression=$(FORCE_COMPRESSION),name=$(IMAGE):$(TAG),name=$(IMAGE):latest
+PUSH_TAG_FLAGS  :=
+else ifeq ($(PUSH_EXPORTER),image)
+PUSH_OUTPUT     := --output=type=image,push=true,compression=$(COMPRESSION),force-compression=$(FORCE_COMPRESSION)
+PUSH_TAG_FLAGS  := -t $(IMAGE):$(TAG) -t $(IMAGE):latest
+else
+$(error Unsupported PUSH_EXPORTER '$(PUSH_EXPORTER)'. Use 'image' or 'registry')
+endif
+
 help:
 	@echo "Targets:"
 	@echo "  builder-init  - init buildx"
 	@echo "  login         - docker login"
 	@echo "  build         - build (no push), tags :latest and :\$$TAG (uses --load, saves tag to .build_tag)"
 	@echo "  push          - push :latest and :\$$TAG (with retries, reads tag from .build_tag)"
-	@echo "  push-build    - buildx build and push (no --load), tags :latest and :\$$TAG"
+	@echo "  push-build    - buildx push during build (defaults: gzip, force=false). Vars: PUSH_EXPORTER=image|registry, COMPRESSION=zstd|gzip, FORCE_COMPRESSION=true|false, CLEAR_PROXY=1"
 	@echo "  build-local   - alias of build"
 	@echo "  push-latest   - push only :latest"
 	@echo "  print-tag     - print docker.io/$(IMAGE):$(TAG) (reads from .build_tag if exists)"
 	@echo "  clean         - remove .build_tag file"
 
+# Optional builder opts (e.g., clear proxies inside buildkit)
+ifeq ($(CLEAR_PROXY),1)
+BUILDER_OPTS := --driver-opt env.http_proxy= --driver-opt env.https_proxy= --driver-opt env.no_proxy=*
+else
+BUILDER_OPTS :=
+endif
+
 builder-init:
 	@echo "🔧 Initializing Docker buildx builder..."
-	- docker buildx create --use --name rp-gpu-builder 2>/dev/null || docker buildx use rp-gpu-builder
+	- docker buildx inspect rp-gpu-builder >/dev/null 2>&1 || docker buildx create --use --name rp-gpu-builder $(BUILDER_OPTS)
+	- docker buildx use rp-gpu-builder
 	@echo "✅ Builder ready"
 
 login:
@@ -73,31 +102,35 @@ build build-local: builder-init
 	@echo "✅ Built locally (not pushed). Tag saved to $(BUILD_TAG_FILE)"
 
 # Build and push in one step using buildx --push (no local load)
-push-build: builder-init
+push-build: builder-init login
 	@echo "🚀 Build & push for $(PLAT)"
 	@echo "   Image: $(IMAGE):$(TAG)"
 	@echo "   Also tagging: $(IMAGE):latest"
 	docker buildx build \
 		$(BUILD_FLAGS) \
-		--output=type=registry,compression=zstd,force-compression=true,name=$(IMAGE):$(TAG),name=$(IMAGE):latest \
+		$(PUSH_TAG_FLAGS) \
+		$(PUSH_OUTPUT) \
 		.
 
-# Robust push with small retry loop
+# Robust push with retry/backoff
+PUSH_RETRIES       ?= 7
+PUSH_BACKOFF_INIT  ?= 5
+
 push: login
 	@echo "🚀 Pushing docker.io/$(IMAGE):$(TAG) and :latest"
-	@attempt=0; max=5; delay=5; \
+	@attempt=0; max=$(PUSH_RETRIES); delay=$(PUSH_BACKOFF_INIT); \
 	until [ $$attempt -ge $$max ]; do \
 	  attempt=$$((attempt+1)); \
 	  echo "→ [$$attempt/$$max] docker push $(IMAGE):$(TAG)"; \
-	  if docker push $(IMAGE):$(TAG); then break; fi; \
+	  if DOCKER_CLIENT_TIMEOUT=900 docker push $(IMAGE):$(TAG); then break; fi; \
 	  echo "   retrying in $$delay s…"; sleep $$delay; delay=$$((delay*2)); \
 	done; \
 	if [ $$attempt -ge $$max ]; then echo "❌ Push failed for :$(TAG)"; exit 1; fi; \
-	attempt=0; delay=5; \
+	attempt=0; delay=$(PUSH_BACKOFF_INIT); \
 	until [ $$attempt -ge $$max ]; do \
 	  attempt=$$((attempt+1)); \
 	  echo "→ [$$attempt/$$max] docker push $(IMAGE):latest"; \
-	  if docker push $(IMAGE):latest; then break; fi; \
+	  if DOCKER_CLIENT_TIMEOUT=900 docker push $(IMAGE):latest; then break; fi; \
 	  echo "   retrying in $$delay s…"; sleep $$delay; delay=$$((delay*2)); \
 	done; \
 	if [ $$attempt -ge $$max ]; then echo "❌ Push failed for :latest"; exit 1; fi
