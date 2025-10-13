@@ -1,0 +1,20 @@
+[project]
+name = "gta1-serve"
+version = "0.1.0"
+description = "vLLM-based serverless deployment for GTA1-32B on RunPod"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pillow",
+    "blobfile",
+    "transformers==4.44.2",
+    "huggingface-hub<0.24",
+    "aiohttp",
+    "pydantic<3",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+

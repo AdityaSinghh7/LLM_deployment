@@ -1,0 +1,38 @@
+# Base image with vLLM 0.11.0 for CUDA/A100
+FROM vllm/vllm-openai:v0.10.1
+
+# Set working directory
+WORKDIR /app
+
+# Copy project files
+COPY pyproject.toml /app/
+COPY src/ /app/src/
+COPY docker/entrypoint.sh /app/entrypoint.sh
+
+# Install project dependencies (preserves base image's Torch/CUDA)
+RUN pip install --no-cache-dir -e .
+
+# Set cache environment variables for persistent storage
+ENV HF_HOME=/runpod-volume/hf
+ENV HUGGINGFACE_HUB_CACHE=/runpod-volume/hf/hub
+ENV XDG_CACHE_HOME=/runpod-volume/.cache
+ENV TRITON_CACHE_DIR=/runpod-volume/.cache/triton
+ENV VLLM_CACHE_ROOT=/runpod-volume/.cache/vllm
+
+# Set service configuration
+ENV MODEL_ID=Salesforce/GTA1-32B
+ENV PORT=8000
+ENV PORT_HEALTH=8001
+ENV VLLM_USE_V1=0
+ENV TOKENIZERS_PARALLELISM=false
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+
+# Make entrypoint executable
+RUN chmod +x /app/entrypoint.sh
+
+# Expose ports
+EXPOSE 8000 8001
+
+# Set entrypoint
+ENTRYPOINT ["/app/entrypoint.sh"]
+
