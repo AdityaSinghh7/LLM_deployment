@@ -14,7 +14,7 @@ os.environ.setdefault("VLLM_USE_V1", "1")
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
-from transformers import AutoTokenizer, AutoImageProcessor
+from transformers import AutoTokenizer, AutoImageProcessor, AutoProcessor
 from vllm import LLM, SamplingParams
 
 from utils_mm import extract_images, build_prompt_with_template, smart_resize
@@ -59,11 +59,29 @@ def initialize_model():
     
     # Load image processor for smart resize
     print("🖼️  Loading image processor...")
-    image_processor = AutoImageProcessor.from_pretrained(
-        MODEL_ID,
-        revision=MODEL_REVISION,
-        trust_remote_code=True
-    )
+    try:
+        image_processor = AutoImageProcessor.from_pretrained(
+            MODEL_ID,
+            revision=MODEL_REVISION,
+            trust_remote_code=True,
+        )
+    except Exception as e_img:
+        print(f"⚠️  AutoImageProcessor not available for {MODEL_ID}: {e_img}")
+        # Try a more generic AutoProcessor, which may bundle an image processor
+        try:
+            generic_proc = AutoProcessor.from_pretrained(
+                MODEL_ID,
+                revision=MODEL_REVISION,
+                trust_remote_code=True,
+            )
+            image_processor = getattr(generic_proc, "image_processor", None)
+            if image_processor is not None:
+                print("✅ Using image_processor from AutoProcessor")
+            else:
+                print("⚠️  AutoProcessor loaded but no image_processor field; using defaults")
+        except Exception as e_auto:
+            print(f"⚠️  AutoProcessor not available either: {e_auto}\nUsing default resize heuristics.")
+            image_processor = None  # smart_resize will fallback to defaults
     
     # Initialize vLLM
     print("🚀 Loading vLLM engine...")
@@ -243,4 +261,3 @@ if __name__ == "__main__":
         workers=1,
         log_level="info"
     )
-

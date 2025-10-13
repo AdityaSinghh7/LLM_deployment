@@ -6,6 +6,7 @@ Handles image processing, data URI parsing, and prompt template building.
 import base64
 import re
 from typing import Dict, List
+import os
 from PIL import Image
 from io import BytesIO
 
@@ -79,6 +80,13 @@ def build_prompt_with_template(tokenizer, messages: List[Dict]) -> str:
     return text2
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except Exception:
+        return default
+
+
 def smart_resize(image: Image.Image, processor) -> Image.Image:
     """
     Smart resize for GTA1-32B using AutoImageProcessor parameters.
@@ -97,10 +105,10 @@ def smart_resize(image: Image.Image, processor) -> Image.Image:
     size_config = processor.size if hasattr(processor, 'size') else {}
     
     # Extract parameters (with defaults matching GTA1-32B)
-    patch_size = size_config.get('patch_size', 14)
-    merge_size = size_config.get('merge_size', 2)
-    min_pixels = size_config.get('min_pixels', 4 * 28 * 28)
-    max_pixels = size_config.get('max_pixels', 16384 * 28 * 28)
+    patch_size = _env_int('IMAGE_PATCH_SIZE', size_config.get('patch_size', 14))
+    merge_size = _env_int('IMAGE_MERGE_SIZE', size_config.get('merge_size', 2))
+    min_pixels = _env_int('IMAGE_MIN_PIXELS', size_config.get('min_pixels', 4 * 28 * 28))
+    max_pixels = _env_int('IMAGE_MAX_PIXELS', size_config.get('max_pixels', 16384 * 28 * 28))
     
     # Calculate effective patch size after merging
     effective_patch_size = patch_size * merge_size
@@ -139,4 +147,3 @@ def smart_resize(image: Image.Image, processor) -> Image.Image:
         image = image.resize((target_width, target_height), Image.Resampling.BICUBIC)
     
     return image
-
