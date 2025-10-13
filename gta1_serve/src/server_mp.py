@@ -26,6 +26,9 @@ from utils_mm import extract_images, build_prompt_with_template, smart_resize
 
 MODEL_ID = os.environ.get("MODEL_ID", "Salesforce/GTA1-32B")
 MODEL_REVISION = os.environ.get("MODEL_REVISION", None)
+TOKENIZER_ID = os.environ.get("TOKENIZER_ID", os.environ.get("HF_TOKENIZER_ID", None)) or os.environ.get("MODEL_TOKENIZER_ID", None) or os.environ.get("MODEL_TOKENIZER", None) or None
+TOKENIZER_ID = TOKENIZER_ID or os.environ.get("MODEL_ID", "Salesforce/GTA1-32B")
+TOKENIZER_REVISION = os.environ.get("TOKENIZER_REVISION", None)
 PORT = int(os.environ.get("PORT", "8000"))
 PORT_HEALTH = int(os.environ.get("PORT_HEALTH", "8001"))
 
@@ -38,6 +41,12 @@ llm_instance: Optional[LLM] = None
 hf_tokenizer = None
 image_processor = None
 model_dtype = "bfloat16"
+tokenizer_mode = os.environ.get("TOKENIZER_MODE", "slow")
+try:
+    # Default to 8192 if not provided
+    max_model_len = int(os.environ.get("MAX_MODEL_LEN", "8192"))
+except Exception:
+    max_model_len = 8192
 
 
 def initialize_model():
@@ -52,9 +61,10 @@ def initialize_model():
     # Load tokenizer for chat template
     print("📝 Loading tokenizer...")
     hf_tokenizer = AutoTokenizer.from_pretrained(
-        MODEL_ID,
-        revision=MODEL_REVISION,
-        trust_remote_code=True
+        TOKENIZER_ID,
+        revision=TOKENIZER_REVISION or MODEL_REVISION,
+        trust_remote_code=True,
+        use_fast=True,
     )
     
     # Load image processor for smart resize
@@ -85,16 +95,19 @@ def initialize_model():
     
     # Initialize vLLM
     print("🚀 Loading vLLM engine...")
-    llm_instance = LLM(
+    llm_kwargs = dict(
         model=MODEL_ID,
-        tokenizer=MODEL_ID,
-        tokenizer_mode="slow",
+        tokenizer=TOKENIZER_ID,
+        tokenizer_mode=tokenizer_mode,
         trust_remote_code=True,
         dtype=model_dtype,
         limit_mm_per_prompt={"image": 1},
         tensor_parallel_size=1,
         revision=MODEL_REVISION,
+        tokenizer_revision=TOKENIZER_REVISION or MODEL_REVISION,
     )
+    llm_kwargs["max_model_len"] = max_model_len
+    llm_instance = LLM(**llm_kwargs)
     
     print(f"✅ vLLM initialized successfully for {MODEL_ID}")
 

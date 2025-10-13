@@ -10,6 +10,8 @@ echo "  PORT: ${PORT}"
 echo "  PORT_HEALTH: ${PORT_HEALTH}"
 echo "  HF_HOME: ${HF_HOME}"
 echo "  VLLM_USE_V1: ${VLLM_USE_V1}"
+echo "  TOKENIZER_ID: ${TOKENIZER_ID:-$MODEL_ID}"
+echo "  MAX_MODEL_LEN: ${MAX_MODEL_LEN:-8192}"
 
 # Optional: Warmup phase
 if [ "${WARMUP}" = "1" ]; then
@@ -54,4 +56,3 @@ exec python3 -m uvicorn server_mp:app \
     --port ${PORT} \
     --workers 1 \
     --log-level info
-
