@@ -13,7 +13,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       blobfile \
       uvicorn[standard] \
       pillow \
-      requests
+      requests \
+      tiktoken
 
 # Copy provider serving code and entrypoint
 COPY src/model_serving.py /app/src/model_serving.py
