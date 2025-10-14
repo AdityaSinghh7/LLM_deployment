@@ -5,14 +5,17 @@ WORKDIR /app
 
 # Copy only the provider serving code and minimal deps footprint
 COPY src/model_serving.py /app/src/model_serving.py
+COPY docker/entrypoint.ray.sh /app/entrypoint.ray.sh
 
 # Install runtime dependencies for provider path (keep base vLLM stack intact)
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
       "ray[serve]" \
       fastapi \
+      uvicorn[standard] \
       pillow \
-      requests
+      requests && \
+    chmod +x /app/entrypoint.ray.sh
 
 # Cache + service defaults
 ENV HF_HOME=/runpod-volume/hf \
@@ -22,14 +25,13 @@ ENV HF_HOME=/runpod-volume/hf \
     VLLM_CACHE_ROOT=/runpod-volume/.cache/vllm \
     MODEL_ID=Salesforce/GTA1-32B \
     PORT=3005 \
+    PORT_HEALTH=3006 \
     NUM_REPLICAS=1 \
     TOKENIZERS_PARALLELISM=false \
     HF_HUB_ENABLE_HF_TRANSFER=1
 
 # Expose provider’s default port
-EXPOSE 3005
+EXPOSE 3005 3006
 
-# Run the provider app directly (no uvicorn; Ray Serve owns HTTP)
-ENTRYPOINT ["python3", "-u", "/app/src/model_serving.py"]
-CMD ["--model_path", "${MODEL_ID}", "--host", "0.0.0.0", "--port", "${PORT}", "--num_replicas", "${NUM_REPLICAS}"]
-
+# Entry runs health server and then Ray Serve app
+ENTRYPOINT ["/app/entrypoint.ray.sh"]
