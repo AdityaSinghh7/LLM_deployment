@@ -85,12 +85,21 @@ def build_prompt_with_template(tokenizer: AutoTokenizer, messages: List[Dict]) -
 # Deployment
 # -------------------------
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except Exception:
+        return default
+
+
 def build_app(model_path: str, num_replicas: int, port: int):
     api = FastAPI(title="GTA1-32B Multi-GPU Service (High-throughput)")
+    model_actor_cpus = _env_float("MODEL_ACTOR_CPUS", 3.0)
+    app_actor_cpus = _env_float("APP_ACTOR_CPUS", 0.5)
 
     @serve.deployment(
         num_replicas=num_replicas,
-        ray_actor_options={"num_gpus": 1, "num_cpus": 4},
+        ray_actor_options={"num_gpus": 1, "num_cpus": model_actor_cpus},
         max_ongoing_requests=16,
     )
     class GTA1Model:
@@ -237,7 +246,7 @@ def build_app(model_path: str, num_replicas: int, port: int):
 
     model = GTA1Model.bind(model_path)
 
-    @serve.deployment(max_ongoing_requests=96)
+    @serve.deployment(max_ongoing_requests=96, ray_actor_options={"num_cpus": app_actor_cpus})
     @serve.ingress(api)
     class GTA1App:
         def __init__(self, model_handle):
