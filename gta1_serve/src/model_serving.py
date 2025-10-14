@@ -18,7 +18,7 @@ import requests
 import ray
 from ray import serve
 from fastapi import FastAPI
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoImageProcessor, AutoProcessor
 from vllm import LLM, SamplingParams
 import uuid
 
@@ -92,6 +92,51 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except Exception:
+        return default
+
+
+def smart_resize(image: Image.Image, processor) -> Image.Image:
+    """Provider-style smart resize using processor attributes.
+
+    Reads patch_size, merge_size, min_pixels, max_pixels from the model's
+    image processor (Qwen2VL/OpenCUA) and resizes the image accordingly.
+    """
+    ip = getattr(processor, 'image_processor', processor) if processor is not None else None
+    size_config = getattr(ip, 'size', {}) if (ip is not None and hasattr(ip, 'size')) else {}
+
+    patch_size = _env_int('IMAGE_PATCH_SIZE', getattr(ip, 'patch_size', size_config.get('patch_size', 14)))
+    merge_size = _env_int('IMAGE_MERGE_SIZE', getattr(ip, 'merge_size', size_config.get('merge_size', 2)))
+    min_pixels = _env_int('IMAGE_MIN_PIXELS', getattr(ip, 'min_pixels', size_config.get('min_pixels', 4 * 28 * 28)))
+    max_pixels = _env_int('IMAGE_MAX_PIXELS', getattr(ip, 'max_pixels', size_config.get('max_pixels', 16384 * 28 * 28)))
+
+    effective = patch_size * merge_size
+    width, height = image.size
+    total_pixels = width * height
+
+    if total_pixels < min_pixels:
+        scale = (min_pixels / total_pixels) ** 0.5
+        target_w = int(width * scale)
+        target_h = int(height * scale)
+    elif total_pixels > max_pixels:
+        scale = (max_pixels / total_pixels) ** 0.5
+        target_w = int(width * scale)
+        target_h = int(height * scale)
+    else:
+        target_w, target_h = width, height
+
+    # Round to multiples of effective patch size and ensure at least one patch
+    target_w = max((target_w // effective) * effective, effective)
+    target_h = max((target_h // effective) * effective, effective)
+
+    if target_w != width or target_h != height:
+        image = image.resize((target_w, target_h), Image.Resampling.BICUBIC)
+    return image
+
+
 def build_app(model_path: str, num_replicas: int, port: int):
     api = FastAPI(title="GTA1-32B Multi-GPU Service (High-throughput)")
     model_actor_cpus = _env_float("MODEL_ACTOR_CPUS", 3.0)
@@ -112,15 +157,13 @@ def build_app(model_path: str, num_replicas: int, port: int):
             if not torch.cuda.is_available():
                 raise RuntimeError("CUDA is not available")
 
-            # Tokenizer override: vLLM's Qwen2.5-VL processor expects a Qwen2 tokenizer
+            # Tokenizer: default to provider tokenizer from the same repo as the model
             tok_id_env = (
                 os.environ.get("TOKENIZER_ID")
                 or os.environ.get("MODEL_TOKENIZER_ID")
                 or os.environ.get("HF_TOKENIZER_ID")
             )
             tokenizer_id = tok_id_env or model_path
-            if tokenizer_id == model_path and ("GTA1" in model_path or model_path.startswith("Salesforce/GTA1")):
-                tokenizer_id = "Qwen/Qwen2.5-VL-7B-Instruct"
             tok_rev = os.environ.get("TOKENIZER_REVISION") or os.environ.get("MODEL_TOKENIZER_REVISION")
             print(f"📝 Using tokenizer for vLLM: {tokenizer_id}{'@'+tok_rev if tok_rev else ''}")
 
@@ -135,7 +178,7 @@ def build_app(model_path: str, num_replicas: int, port: int):
             self.llm = LLM(
                 model=model_path,
                 tokenizer=tokenizer_id,
-                tokenizer_mode="auto",
+                tokenizer_mode=os.environ.get("TOKENIZER_MODE", "slow"),
                 trust_remote_code=True,
                 dtype="bfloat16",
                 limit_mm_per_prompt={"image": 1},
@@ -145,10 +188,61 @@ def build_app(model_path: str, num_replicas: int, port: int):
                 tokenizer_revision=tok_rev,
             )
             self.vllm_tokenizer = self.llm.get_tokenizer()
-            self.hf_tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+            # Use the same tokenizer ID/revision as vLLM for chat templating,
+            # to ensure special multimodal tokens match what vLLM expects.
+            self.hf_tokenizer = AutoTokenizer.from_pretrained(
+                tokenizer_id,
+                trust_remote_code=True,
+                revision=tok_rev,
+            )
+            # Load image processor for smart resize (provider-style)
+            self.image_processor = None
+            try:
+                print("🖼️  Loading image processor for smart resize…")
+                self.image_processor = AutoImageProcessor.from_pretrained(
+                    model_path,
+                    trust_remote_code=True,
+                )
+            except Exception as e_img:
+                print(f"⚠️  AutoImageProcessor not available: {e_img}")
+                try:
+                    generic_proc = AutoProcessor.from_pretrained(
+                        model_path,
+                        trust_remote_code=True,
+                    )
+                    self.image_processor = getattr(generic_proc, 'image_processor', None)
+                    if self.image_processor is not None:
+                        print("✅ Using image_processor from AutoProcessor")
+                    else:
+                        print("⚠️  AutoProcessor loaded but no image_processor field; using defaults")
+                except Exception as e_auto:
+                    print(f"⚠️  AutoProcessor not available either: {e_auto}\nUsing default resize heuristics.")
             self.model_path = model_path
             self.dtype = "bfloat16"
             print(f"✅ vLLM initialized successfully (Ray GPU Id: {self.gpu_id})")
+
+            # Optional: debug print token IDs to confirm alignment between vLLM and HF tokenizers
+            debug_tokens = os.environ.get("DEBUG_TOKENS", "0").lower()
+            if debug_tokens in ("1", "true", "yes"):                
+                try:
+                    vllm_imgpad = self.vllm_tokenizer.encode("<|image_pad|>", add_special_tokens=False)[0]
+                except Exception as e:
+                    vllm_imgpad = f"error: {e}"
+                hf_imgpad = None
+                try:
+                    # Prefer the explicit path used elsewhere
+                    hf_imgpad = self.hf_tokenizer.encode("<|image_pad|>", add_special_tokens=False)[0]
+                except Exception:
+                    try:
+                        # Fallback without kwargs for custom tokenizers
+                        tmp = self.hf_tokenizer.encode("<|image_pad|>")
+                        hf_imgpad = tmp[0] if isinstance(tmp, (list, tuple)) else tmp
+                    except Exception:
+                        try:
+                            hf_imgpad = self.hf_tokenizer.convert_tokens_to_ids("<|image_pad|>")
+                        except Exception as e2:
+                            hf_imgpad = f"error: {e2}"
+                print(f"🔎 Token alignment: <|image_pad|> vLLM={vllm_imgpad} HF={hf_imgpad}")
 
         # ------------ batching core ------------
         @serve.batch(max_batch_size=8, batch_wait_timeout_s=0.1) # increase if GPU allows
@@ -179,7 +273,9 @@ def build_app(model_path: str, num_replicas: int, port: int):
                     if sum(i == id_imgpad for i in ids) != 1 or any(i == id_media for i in ids):
                         raise RuntimeError("Prompt media tokens invalid after conversion")
                     prompts.append(prompt_text)
-                    images_per_req.append(imgs[0])
+                    # Provider-style smart resize
+                    resized = smart_resize(imgs[0], self.image_processor)
+                    images_per_req.append(resized)
                 except Exception as e:
                     early_exit = True
                     trace = traceback.format_exc()
@@ -245,7 +341,7 @@ def build_app(model_path: str, num_replicas: int, port: int):
                 trace = traceback.format_exc()
                 return {"response": "", "error": {"message": str(e), "trace": trace}, "usage": {}, "gpu_id": self.gpu_id}
 
-        def health(self):
+        async def health(self):
             return {
                 "status": "ok",
                 "gpu_id": self.gpu_id,
@@ -260,6 +356,14 @@ def build_app(model_path: str, num_replicas: int, port: int):
     class GTA1App:
         def __init__(self, model_handle):
             self.model_deployment = model_handle
+
+        @api.get("/ready")
+        async def ready(self):
+            return {"status": "ok"}
+
+        @api.get("/ping")
+        async def ping(self):
+            return {"status": "ok"}
 
         @api.get("/health")
         async def health_all(self):

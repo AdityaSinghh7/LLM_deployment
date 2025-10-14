@@ -64,9 +64,13 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.IMAGE }}:cache
-          cache-to: type=registry,ref=${{ env.IMAGE }}:cache,mode=max
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE }}:cache
+            type=registry,ref=${{ env.IMAGE }}:latest
+            type=gha
+          cache-to: |
+            type=registry,ref=${{ env.IMAGE }}:cache,mode=max
+            type=gha,mode=max
           provenance: false
           sbom: false
           outputs: type=image,push=true,compression=gzip,force-compression=false
-

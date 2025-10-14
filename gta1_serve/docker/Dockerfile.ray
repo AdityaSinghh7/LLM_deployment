@@ -3,20 +3,22 @@ FROM vllm/vllm-openai:v0.10.1
 
 WORKDIR /app
 
-# Copy only the provider serving code and minimal deps footprint
-COPY src/model_serving.py /app/src/model_serving.py
-COPY docker/entrypoint.ray.sh /app/entrypoint.ray.sh
-
-# Install runtime dependencies for provider path (keep base vLLM stack intact)
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
+# Install runtime dependencies early to maximize layer cache reuse
+# (kept independent from app source changes)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && \
+    pip install \
       "ray[serve]" \
       fastapi \
       blobfile \
       uvicorn[standard] \
       pillow \
-      requests && \
-    chmod +x /app/entrypoint.ray.sh
+      requests
+
+# Copy provider serving code and entrypoint
+COPY src/model_serving.py /app/src/model_serving.py
+COPY docker/entrypoint.ray.sh /app/entrypoint.ray.sh
+RUN chmod +x /app/entrypoint.ray.sh
 
 # Cache + service defaults
 ENV HF_HOME=/runpod-volume/hf \
@@ -27,6 +29,8 @@ ENV HF_HOME=/runpod-volume/hf \
     MAX_MODEL_LEN=24576 \
     GPU_MEMORY_UTILIZATION=0.92 \
     MODEL_ID=Salesforce/GTA1-32B \
+    TOKENIZER_ID=Salesforce/GTA1-32B \
+    TOKENIZER_MODE=slow \
     PORT=3005 \
     PORT_HEALTH=3006 \
     NUM_REPLICAS=1 \

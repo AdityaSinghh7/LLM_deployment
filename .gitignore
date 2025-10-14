@@ -88,3 +88,6 @@ docker-bake.hcl.local
 .cache/
 .ruff_cache/
 
+*/data/*
+*/output/*
+*/runpod_env.txt

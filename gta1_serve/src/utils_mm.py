@@ -101,14 +101,15 @@ def smart_resize(image: Image.Image, processor) -> Image.Image:
     Returns:
         Resized PIL Image
     """
-    # Get size config from processor
-    size_config = processor.size if hasattr(processor, 'size') else {}
-    
-    # Extract parameters (with defaults matching GTA1-32B)
-    patch_size = _env_int('IMAGE_PATCH_SIZE', size_config.get('patch_size', 14))
-    merge_size = _env_int('IMAGE_MERGE_SIZE', size_config.get('merge_size', 2))
-    min_pixels = _env_int('IMAGE_MIN_PIXELS', size_config.get('min_pixels', 4 * 28 * 28))
-    max_pixels = _env_int('IMAGE_MAX_PIXELS', size_config.get('max_pixels', 16384 * 28 * 28))
+    # Prefer direct attributes from Qwen2VL/OpenCUA image processor
+    ip = getattr(processor, 'image_processor', processor)
+    size_config = getattr(ip, 'size', {}) if hasattr(ip, 'size') else {}
+
+    # Extract parameters (with provider defaults)
+    patch_size = _env_int('IMAGE_PATCH_SIZE', getattr(ip, 'patch_size', size_config.get('patch_size', 14)))
+    merge_size = _env_int('IMAGE_MERGE_SIZE', getattr(ip, 'merge_size', size_config.get('merge_size', 2)))
+    min_pixels = _env_int('IMAGE_MIN_PIXELS', getattr(ip, 'min_pixels', size_config.get('min_pixels', 4 * 28 * 28)))
+    max_pixels = _env_int('IMAGE_MAX_PIXELS', getattr(ip, 'max_pixels', size_config.get('max_pixels', 16384 * 28 * 28)))
     
     # Calculate effective patch size after merging
     effective_patch_size = patch_size * merge_size
