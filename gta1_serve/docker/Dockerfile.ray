@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
       "ray[serve]" \
       fastapi \
+      blobfile \
       uvicorn[standard] \
       pillow \
       requests && \
