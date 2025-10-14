@@ -9,6 +9,9 @@ echo "  PORT: ${PORT:-3005}"
 echo "  PORT_HEALTH: ${PORT_HEALTH:-3006}"
 echo "  NUM_REPLICAS: ${NUM_REPLICAS:-1}"
 echo "  HF_HOME: ${HF_HOME:-/runpod-volume/hf}"
+echo "  TOKENIZER_ID: ${TOKENIZER_ID:-$MODEL_ID}"
+echo "  MAX_MODEL_LEN: ${MAX_MODEL_LEN:-24576}"
+echo "  GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION:-0.92}"
 
 # Start health server in background on PORT_HEALTH
 echo "💓 Starting health server on port ${PORT_HEALTH:-3006}..."

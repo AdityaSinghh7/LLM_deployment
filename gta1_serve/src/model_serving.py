@@ -124,6 +124,14 @@ def build_app(model_path: str, num_replicas: int, port: int):
             tok_rev = os.environ.get("TOKENIZER_REVISION") or os.environ.get("MODEL_TOKENIZER_REVISION")
             print(f"📝 Using tokenizer for vLLM: {tokenizer_id}{'@'+tok_rev if tok_rev else ''}")
 
+            # Read runtime configurable KV/cache + context settings
+            max_model_len = int(os.environ.get("MAX_MODEL_LEN", "24576"))
+            gpu_memory_utilization = float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.92"))
+            print(
+                f"⚙️ vLLM config: max_model_len={max_model_len}, "
+                f"gpu_memory_utilization={gpu_memory_utilization}"
+            )
+
             self.llm = LLM(
                 model=model_path,
                 tokenizer=tokenizer_id,
@@ -131,7 +139,8 @@ def build_app(model_path: str, num_replicas: int, port: int):
                 trust_remote_code=True,
                 dtype="bfloat16",
                 limit_mm_per_prompt={"image": 1},
-                max_model_len=32768,
+                max_model_len=max_model_len,
+                gpu_memory_utilization=gpu_memory_utilization,
                 tensor_parallel_size=1,
                 tokenizer_revision=tok_rev,
             )
