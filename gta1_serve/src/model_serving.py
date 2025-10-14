@@ -318,3 +318,21 @@ if __name__ == "__main__":
         print(r.json())
     except Exception as e:
         print("Health probe failed:", e)
+
+    # Prevent the driver (PID 1) from exiting so the container stays alive
+    # and the detached Ray Serve app continues running.
+    try:
+        import signal, time
+        print("🟢 Serve is running; holding process open. Press Ctrl+C to exit.")
+        try:
+            # On Unix, this blocks until a signal is received
+            signal.pause()
+        except (AttributeError, KeyboardInterrupt):
+            # Fallback for platforms without signal.pause() or manual interrupt
+            while True:
+                time.sleep(3600)
+    except Exception:
+        # As a last resort, loop sleep
+        import time
+        while True:
+            time.sleep(3600)
