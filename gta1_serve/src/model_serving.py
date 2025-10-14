@@ -103,15 +103,28 @@ def build_app(model_path: str, num_replicas: int, port: int):
             if not torch.cuda.is_available():
                 raise RuntimeError("CUDA is not available")
 
+            # Tokenizer override: vLLM's Qwen2.5-VL processor expects a Qwen2 tokenizer
+            tok_id_env = (
+                os.environ.get("TOKENIZER_ID")
+                or os.environ.get("MODEL_TOKENIZER_ID")
+                or os.environ.get("HF_TOKENIZER_ID")
+            )
+            tokenizer_id = tok_id_env or model_path
+            if tokenizer_id == model_path and ("GTA1" in model_path or model_path.startswith("Salesforce/GTA1")):
+                tokenizer_id = "Qwen/Qwen2.5-VL-7B-Instruct"
+            tok_rev = os.environ.get("TOKENIZER_REVISION") or os.environ.get("MODEL_TOKENIZER_REVISION")
+            print(f"📝 Using tokenizer for vLLM: {tokenizer_id}{'@'+tok_rev if tok_rev else ''}")
+
             self.llm = LLM(
                 model=model_path,
-                tokenizer=model_path,
-                tokenizer_mode="slow",
+                tokenizer=tokenizer_id,
+                tokenizer_mode="auto",
                 trust_remote_code=True,
                 dtype="bfloat16",
                 limit_mm_per_prompt={"image": 1},
                 max_model_len=32768,
                 tensor_parallel_size=1,
+                tokenizer_revision=tok_rev,
             )
             self.vllm_tokenizer = self.llm.get_tokenizer()
             self.hf_tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
