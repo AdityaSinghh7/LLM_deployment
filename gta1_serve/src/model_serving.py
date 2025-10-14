@@ -262,7 +262,18 @@ if __name__ == "__main__":
     parser.add_argument("--num_replicas", type=int, default=2)
     args = parser.parse_args()
     N_REPLICAS = args.num_replicas
-    ray.init(ignore_reinit_error=True)
+    # Constrain Ray's perceived resources to avoid oversubscription in containers
+    # and ensure a GPU resource is registered for local scheduling.
+    try:
+        num_cpus = int(os.environ.get("RAY_NUM_CPUS", "4"))
+    except Exception:
+        num_cpus = 4
+    try:
+        num_gpus = int(os.environ.get("RAY_NUM_GPUS", str(max(1, args.num_replicas))))
+    except Exception:
+        num_gpus = max(1, args.num_replicas)
+
+    ray.init(ignore_reinit_error=True, include_dashboard=False, num_cpus=num_cpus, num_gpus=num_gpus)
 
     print(f"🚀 Starting GTA1-32B service on {args.host}:{args.port}")
     serve.start(detached=True, http_options={"host": args.host, "port": args.port})
