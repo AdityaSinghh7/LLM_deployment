@@ -1,0 +1,127 @@
+.PHONY: help builder-init login build push push-build print-tag clean
+
+# ---- Config (Ray image) ----
+REGISTRY_USER := adityads7
+IMAGE_NAME    := gta1-serve-ray
+IMAGE         := $(REGISTRY_USER)/$(IMAGE_NAME)
+PLAT          := linux/amd64
+DOCKERFILE    := docker/Dockerfile.ray
+
+# Tag handling
+BUILD_TAG_FILE := .build_tag_ray
+ifndef TAG
+  ifneq (,$(wildcard $(BUILD_TAG_FILE)))
+    TAG := $(shell cat $(BUILD_TAG_FILE))
+  else
+    DATE_TAG := $(shell date -u +"%Y%m%d-%H%M%S")
+    TAG := $(DATE_TAG)
+  endif
+endif
+
+# Optional: registry cache (opt-in)
+ifeq ($(PUSH_CACHE),1)
+CACHE_REF   := $(IMAGE):cache
+CACHE_FLAGS := --build-arg BUILDKIT_INLINE_CACHE=1 \
+              --cache-from=type=registry,ref=$(CACHE_REF) \
+              --cache-to=type=registry,ref=$(CACHE_REF),mode=max
+else
+CACHE_FLAGS :=
+endif
+
+# Compression/defaults (favor cross-mounts on Hub)
+COMPRESSION        ?= gzip
+FORCE_COMPRESSION  ?= false
+PUSH_EXPORTER      ?= image
+
+# Common build flags
+BUILD_FLAGS := --platform $(PLAT) \
+               -f $(DOCKERFILE) \
+               --provenance=false \
+               --sbom=false \
+               $(CACHE_FLAGS)
+
+# Exporter selection
+ifeq ($(PUSH_EXPORTER),registry)
+PUSH_OUTPUT    := --output=type=registry,compression=$(COMPRESSION),force-compression=$(FORCE_COMPRESSION),name=$(IMAGE):$(TAG),name=$(IMAGE):latest
+PUSH_TAG_FLAGS :=
+else ifeq ($(PUSH_EXPORTER),image)
+PUSH_OUTPUT    := --output=type=image,push=true,compression=$(COMPRESSION),force-compression=$(FORCE_COMPRESSION)
+PUSH_TAG_FLAGS := -t $(IMAGE):$(TAG) -t $(IMAGE):latest
+else
+$(error Unsupported PUSH_EXPORTER '$(PUSH_EXPORTER)'. Use 'image' or 'registry')
+endif
+
+help:
+	@echo "Ray Targets:"
+	@echo "  build        - build Ray image locally (--load)"
+	@echo "  push         - push :latest and :$$TAG (docker push with retries)"
+	@echo "  push-build   - buildx push during build (defaults: gzip, force=false)"
+	@echo "  login        - docker login"
+	@echo "  print-tag    - print docker.io/$(IMAGE):$(TAG)"
+	@echo "  clean        - remove $(BUILD_TAG_FILE)"
+
+builder-init:
+	@echo "🔧 Initializing Docker buildx builder..."
+	- docker buildx create --use --name rp-gpu-builder 2>/dev/null || docker buildx use rp-gpu-builder
+	@echo "✅ Builder ready"
+
+login:
+	@echo "🔐 Logging into Docker Hub..."
+	docker login
+	@echo "✅ Logged in"
+
+build: builder-init
+	@echo "🏗️  Building Ray image for $(PLAT)"
+	@echo "   Image: $(IMAGE):$(TAG)"
+	@echo "   Also tagging: $(IMAGE):latest"
+	docker buildx build \
+		$(BUILD_FLAGS) \
+		-t $(IMAGE):$(TAG) \
+		-t $(IMAGE):latest \
+		--load \
+		.
+	@echo "$(TAG)" > $(BUILD_TAG_FILE)
+	@echo "✅ Built locally (not pushed). Tag saved to $(BUILD_TAG_FILE)"
+
+push-build: builder-init login
+	@echo "🚀 Build & push (Ray) for $(PLAT)"
+	@echo "   Image: $(IMAGE):$(TAG)"
+	@echo "   Also tagging: $(IMAGE):latest"
+	docker buildx build \
+		$(BUILD_FLAGS) \
+		$(PUSH_TAG_FLAGS) \
+		$(PUSH_OUTPUT) \
+		.
+
+# Robust push
+PUSH_RETRIES      ?= 7
+PUSH_BACKOFF_INIT ?= 5
+
+push: login
+	@echo "🚀 Pushing docker.io/$(IMAGE):$(TAG) and :latest (Ray)"
+	@attempt=0; max=$(PUSH_RETRIES); delay=$(PUSH_BACKOFF_INIT); \
+	until [ $$attempt -ge $$max ]; do \
+	  attempt=$$((attempt+1)); \
+	  echo "→ [$$attempt/$$max] docker push $(IMAGE):$(TAG)"; \
+	  if DOCKER_CLIENT_TIMEOUT=900 docker push $(IMAGE):$(TAG); then break; fi; \
+	  echo "   retrying in $$delay s…"; sleep $$delay; delay=$$((delay*2)); \
+	done; \
+	if [ $$attempt -ge $$max ]; then echo "❌ Push failed for :$(TAG)"; exit 1; fi; \
+	attempt=0; delay=$(PUSH_BACKOFF_INIT); \
+	until [ $$attempt -ge $$max ]; do \
+	  attempt=$$((attempt+1)); \
+	  echo "→ [$$attempt/$$max] docker push $(IMAGE):latest"; \
+	  if DOCKER_CLIENT_TIMEOUT=900 docker push $(IMAGE):latest; then break; fi; \
+	  echo "   retrying in $$delay s…"; sleep $$delay; delay=$$((delay*2)); \
+	done; \
+	if [ $$attempt -ge $$max ]; then echo "❌ Push failed for :latest"; exit 1; fi
+	@echo "✅ Push complete."
+
+print-tag:
+	@echo "docker.io/$(IMAGE):$(TAG)"
+
+clean:
+	@echo "🧹 Cleaning up Ray build artifacts..."
+	- rm -f $(BUILD_TAG_FILE)
+	@echo "✅ Cleaned."
+

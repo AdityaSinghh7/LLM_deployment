@@ -28,6 +28,9 @@ MODEL_ID = os.environ.get("MODEL_ID", "Salesforce/GTA1-32B")
 MODEL_REVISION = os.environ.get("MODEL_REVISION", None)
 TOKENIZER_ID = os.environ.get("TOKENIZER_ID", os.environ.get("HF_TOKENIZER_ID", None)) or os.environ.get("MODEL_TOKENIZER_ID", None) or os.environ.get("MODEL_TOKENIZER", None) or None
 TOKENIZER_ID = TOKENIZER_ID or os.environ.get("MODEL_ID", "Salesforce/GTA1-32B")
+# If still defaulting to the GTA1 repo, use Qwen2.5-VL tokenizer by default to match processor expectations
+if TOKENIZER_ID == MODEL_ID and ("GTA1" in MODEL_ID or MODEL_ID.startswith("Salesforce/GTA1")):
+    TOKENIZER_ID = "Qwen/Qwen2.5-VL-7B-Instruct"
 TOKENIZER_REVISION = os.environ.get("TOKENIZER_REVISION", None)
 PORT = int(os.environ.get("PORT", "8000"))
 PORT_HEALTH = int(os.environ.get("PORT_HEALTH", "8001"))
