@@ -22,7 +22,7 @@ fi
 [[ -n "${DEBUG}" ]] && set -x
 
 # Paths
-IMG_PATH="gta1_serve/data/sample_02.png"
+IMG_PATH="gta1_serve/data/EmailTrash_ss.png"
 MIME="image/png"  # change to image/jpeg if needed
 OUT_DIR="gta1_serve/output"
 OUT_JSON="${OUT_DIR}/response.json"
@@ -36,7 +36,7 @@ fi
 
 # Build payload via Python (faster, safer than shell string substitution)
 SYSTEM_PROMPT="You are a GUI agent. You are given a task and a screenshot of the screen. You need to perform a series of pyautogui actions to complete the task."
-INSTRUCTION="click the icon in the bottom row, third from the left"
+INSTRUCTION="click the trash folder icon"
 BODY_FILE="${OUT_DIR}/body.json"
 
 if [[ -n "${DEBUG}" ]]; then set +x; fi

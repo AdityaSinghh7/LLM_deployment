@@ -20,6 +20,7 @@ from ray import serve
 from fastapi import FastAPI
 from transformers import AutoTokenizer, AutoImageProcessor, AutoProcessor
 from vllm import LLM, SamplingParams
+from vllm.sampling_params import GuidedDecodingParams
 import uuid
 
 
@@ -268,9 +269,14 @@ def build_app(model_path: str, num_replicas: int, port: int):
                     # Sanity check on tokens: 1 <|image_pad|>, no <|media_placeholder|>
                     tok = self.vllm_tokenizer
                     id_imgpad = tok.encode("<|image_pad|>", add_special_tokens=False)[0]
-                    id_media = tok.encode("<|media_placeholder|>", add_special_tokens=False)[0]
+                    try:
+                        media_tokens = tok.encode("<|media_placeholder|>", add_special_tokens=False)
+                        id_media = media_tokens[0] if media_tokens else None
+                    except Exception:
+                        id_media = None
                     ids = tok.encode(prompt_text, add_special_tokens=False)
-                    if sum(i == id_imgpad for i in ids) != 1 or any(i == id_media for i in ids):
+                    media_present = id_media is not None and any(i == id_media for i in ids)
+                    if sum(i == id_imgpad for i in ids) != 1 or media_present:
                         raise RuntimeError("Prompt media tokens invalid after conversion")
                     prompts.append(prompt_text)
                     # Provider-style smart resize
@@ -298,10 +304,35 @@ def build_app(model_path: str, num_replicas: int, port: int):
                 return error_results
             # --- vLLM generation ---
             args_base = list_of_payloads[0]
+            # --- Structured output hook (JSON schema / regex / grammar) ---
+            guided = None
+            rf = args_base.get("response_format")
+            # Support OpenAI-style: {"type":"json_schema","json_schema":{"schema":{...},"strict":true}}
+            if isinstance(rf, dict):
+                rf_type = rf.get("type")
+                if rf_type == "json_schema":
+                    js = rf.get("json_schema") or {}
+                    schema = js.get("schema")
+                    if schema:
+                        guided = GuidedDecodingParams(json=schema)
+                elif rf_type == "regex":
+                    pattern = rf.get("regex")
+                    if pattern:
+                        guided = GuidedDecodingParams(regex=pattern)
+                elif rf_type == "grammar":
+                    grammar = rf.get("grammar")
+                    if grammar:
+                        guided = GuidedDecodingParams(grammar=grammar)
+                elif rf_type == "choice":
+                    choices = rf.get("choices")
+                    if choices:
+                        guided = GuidedDecodingParams(choice=choices)
+
             sp = SamplingParams(
                 max_tokens=args_base.get("max_new_tokens", 512),
                 temperature=args_base.get("temperature", 0.0),
                 top_p=args_base.get("top_p", 0.9),
+                guided_decoding=guided,     # ← hard enforcement happens here
             )
 
             requests_list = [
@@ -336,7 +367,7 @@ def build_app(model_path: str, num_replicas: int, port: int):
         async def call_llm(self, payload: Dict):
             try:
                 res = await self._generate_batch(payload)
-                return res
+                return res[0] if isinstance(res, list) and len(res) == 1 else res
             except Exception as e:
                 trace = traceback.format_exc()
                 return {"response": "", "error": {"message": str(e), "trace": trace}, "usage": {}, "gpu_id": self.gpu_id}
