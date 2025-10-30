@@ -4,30 +4,31 @@ FROM nvcr.io/nvidia/pytorch:24.08-py3
 
 # ---- System + env ----------------------------------------------------------------
 ENV DEBIAN_FRONTEND=noninteractive \
-    PIP_NO_CACHE_DIR=1 \
-    HF_HOME=/opt/cache/hf \
-    XDG_CACHE_HOME=/opt/cache/xdg \
-    TRANSFORMERS_CACHE=/opt/cache/transformers \
-    HF_HUB_ENABLE_HF_TRANSFER=1 \
-    OMP_NUM_THREADS=1 \
-    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    NVIDIA_VISIBLE_DEVICES=all \
-    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+  PIP_NO_CACHE_DIR=1 \
+  HF_HOME=/opt/cache/hf \
+  XDG_CACHE_HOME=/opt/cache/xdg \
+  HF_HUB_ENABLE_HF_TRANSFER=1 \
+  OMP_NUM_THREADS=1 \
+  PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  NVIDIA_VISIBLE_DEVICES=all \
+  NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
-RUN mkdir -p /opt/app /opt/cache/hf /opt/cache/xdg /opt/cache/transformers
+RUN mkdir -p /opt/app /opt/cache/hf /opt/cache/xdg
 
 # ---- Python deps (pin carefully) -------------------------------------------------
 # vLLM 0.6.x has stable OpenAI-compatible server + VLM.
 # Transformers >=4.44 needed for recent Qwen3-VL configs.
 # uvicorn only for local debugging; server is vLLM http server.
 RUN pip install --upgrade pip wheel setuptools \
-    && pip install \
-    "vllm==0.6.2" \
-    "transformers==4.45.2" \
-    "huggingface-hub==0.25.2" \
-    "hf-transfer==0.1.6" \
-    "fastapi==0.115.0" \
-    "uvicorn==0.30.6"
+  && pip install \
+  "vllm==0.6.2" \
+  "transformers==4.45.2" \
+  "huggingface-hub==0.25.2" \
+  "hf-transfer==0.1.6" \
+  "fastapi==0.115.0" \
+  "uvicorn==0.30.6" \
+  && pip uninstall -y pynvml || true \
+  && pip install nvidia-ml-py
 
 # ---- Healthcheck helper -----------------------------------------------------------
 COPY --chown=root:root <<'EOF' /opt/app/healthcheck.sh
