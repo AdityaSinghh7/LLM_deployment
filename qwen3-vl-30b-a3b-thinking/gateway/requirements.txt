@@ -1,0 +1,6 @@
+# qwen3-vl-30b-a3b-thinking/gateway/requirements.txt
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+httpx==0.27.2
+pydantic==2.8.2
+anyio==4.4.0

@@ -1,0 +1,76 @@
+name: build-and-push-qwen-serve
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+env:
+  IMAGE: adityads7/qwen3-vl-serve
+
+concurrency:
+  group: build-qwen-serve-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show disk before cleanup
+        run: df -h || true
+
+      - name: Free disk space on runner
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+
+      - name: Show disk after cleanup
+        run: df -h
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push (Qwen serve image)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./qwen3-vl-30b-a3b-thinking/qwen3-vl-serve
+          file: ./qwen3-vl-30b-a3b-thinking/qwen3-vl-serve/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE }}:cache
+            type=registry,ref=${{ env.IMAGE }}:latest
+            type=gha
+          cache-to: |
+            type=registry,ref=${{ env.IMAGE }}:cache,mode=max
+            type=gha,mode=max
+          provenance: false
+          sbom: false
+          outputs: type=image,push=true,compression=gzip,force-compression=false
