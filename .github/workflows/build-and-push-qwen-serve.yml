@@ -59,7 +59,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./qwen3-vl-30b-a3b-thinking/qwen3-vl-serve
-          file: ./qwen3-vl-30b-a3b-thinking/qwen3-vl-serve/Dockerfile
+          file: ./qwen3-vl-30b-a3b-thinking/qwen3-vl-serve/Dockerfile.qwen
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
