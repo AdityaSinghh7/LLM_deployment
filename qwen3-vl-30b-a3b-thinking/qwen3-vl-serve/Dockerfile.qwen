@@ -1,4 +1,4 @@
-# qwen3-vl-30b-a3b-thinking/qwen3-vl-serve/Dockerfile
+# qwen3-vl-30b-a3b-thinking/qwen3-vl-serve/Dockerfile.qwen
 # Pinned CUDA/PyTorch ABI via NGC to avoid flash-attn/kernel mismatch headaches.
 FROM nvcr.io/nvidia/pytorch:24.08-py3
 
@@ -13,12 +13,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
   NVIDIA_VISIBLE_DEVICES=all \
   NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
+# Tools needed for healthchecks etc.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  curl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p /opt/app /opt/cache/hf /opt/cache/xdg
 
 # ---- Python deps (pin carefully) -------------------------------------------------
-# vLLM 0.6.x has stable OpenAI-compatible server + VLM.
+# vLLM 0.6.x has a stable OpenAI-compatible server + VLM.
 # Transformers >=4.44 needed for recent Qwen3-VL configs.
-# uvicorn only for local debugging; server is vLLM http server.
 RUN pip install --upgrade pip wheel setuptools \
   && pip install \
   "vllm==0.6.2" \
@@ -31,6 +35,7 @@ RUN pip install --upgrade pip wheel setuptools \
   && pip install nvidia-ml-py
 
 # ---- Healthcheck helper -----------------------------------------------------------
+# (kept inline; small and static)
 COPY --chown=root:root <<'EOF' /opt/app/healthcheck.sh
 #!/usr/bin/env bash
 set -euo pipefail
@@ -38,29 +43,9 @@ curl -fsS "http://127.0.0.1:${PORT:-8000}/v1/models" >/dev/null
 EOF
 RUN chmod +x /opt/app/healthcheck.sh
 
-# ---- Entrypoint wrapper -----------------------------------------------------------
-COPY --chown=root:root <<'EOF' /opt/app/entrypoint.sh
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Resolve defaults without using the := assignment modifier
-PORT="${PORT:-8000}"
-VLLM_MODEL="${VLLM_MODEL:-Qwen/Qwen3-VL-30B-A3B-Thinking}"
-
-# Sensible defaults; tune in your deployment manifests.
-exec python -m vllm.entrypoints.openai.api_server \
-  --host 0.0.0.0 \
-  --port "${PORT}" \
-  --model "${VLLM_MODEL}" \
-  --trust-remote-code \
-  --tensor-parallel-size "${TP_SIZE:-1}" \
-  ${ENABLE_EXPERT_PARALLEL:+--enable-expert-parallel} \
-  --max-model-len "${MAX_MODEL_LEN:-128000}" \
-  --gpu-memory-utilization "${GPU_MEM_UTIL:-0.90}" \
-  --async-scheduling \
-  --limit-mm-per-prompt.video "${LIMIT_MM_VIDEO:-0}" \
-  --mm-encoder-tp-mode "${MM_ENCODER_TP_MODE:-data}"
-EOF
+# ---- Entrypoint (use your flag auto-detect script) --------------------------------
+# IMPORTANT: this copies the entrypoint.sh that already lives in this folder.
+COPY --chown=root:root entrypoint.sh /opt/app/entrypoint.sh
 RUN chmod +x /opt/app/entrypoint.sh
 
 EXPOSE 8000
